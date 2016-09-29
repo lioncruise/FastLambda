@@ -1,5 +1,4 @@
 Scripts to scrape Github using the Github API to analyze Python developer habits.
 
 Requirements:
--> git
 -> Set environment variables 'GITHUB_USER' and 'GITHUB_PW'
