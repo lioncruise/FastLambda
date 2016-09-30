@@ -10,8 +10,10 @@ class Parser(ast.NodeVisitor):
         for alias in node.names:
             split = alias.name.split('.', 1)
             mod = split[0]
+            if mod in self.local:
+                continue
 
-            if mod not in self.mods and mod not in self.local:
+            if mod not in self.mods:
                 self.mods[mod] = []
 
             for submod in split[1:]:
@@ -19,6 +21,10 @@ class Parser(ast.NodeVisitor):
                     self.mods[mod].append(submod)
 
     def visit_ImportFrom(self, node):
+        # handle relative imports - don't care about local packages
+        if not node.module:
+            return
+
         split = node.module.split('.', 1)
         mod = split[0]
         if len(split) == 1:
@@ -38,17 +44,25 @@ class Parser(ast.NodeVisitor):
             if name not in self.mods[mod]:
                 self.mods[mod].append(name)
             if asname and asname not in self.asnames:
-                self.asnames[asname] = name
+                self.asnames[asname] = {'mod': mod, 'submod': name} 
 
     def visit_Call(self, node):
         func = node.func
         name = self.get_name(node.func)
         attr = self.get_attr(node.func)
 
+        split = name.split('.', 1)
+        name = split[0]
+        if len(split) == 1:
+            prefix = ''
+        else:
+            prefix = '%s.' % split[1]
+
         if name in self.mods:
             mod = name
         elif name in self.asnames:
-            mod = self.asnames[name]
+            mod = self.asnames[name]['mod']
+            attr = '%s.%s' % (self.asnames[name]['submod'], attr)
         else:
             return
 
@@ -73,12 +87,43 @@ class Parser(ast.NodeVisitor):
 
         return 'unknown'
 
-def parse_file(s, local):
-    tree = ast.parse(s)
-    p = Parser(local)
-    p.visit(tree)
+def count_loc(s):
+    numlines  = 0
+    docstring = False
 
-    return p.mods
+    lines = s.split('\n')
+    for line in lines:
+        line = line.strip()
+
+        if line == "" \
+           or line.startswith("#") \
+           or docstring and not (line.startswith('"""') or line.startswith("'''"))\
+           or (line.startswith("'''") and line.endswith("'''") and len(line) >3)  \
+           or (line.startswith('"""') and line.endswith('"""') and len(line) >3) :
+            continue
+
+        # this is either a starting or ending docstring
+        elif line.startswith('"""') or line.startswith("'''"):
+            docstring = not docstring
+            continue
+
+        else:
+            numlines += 1
+
+    return numlines
+
+def parse_file(s, local):
+    try:
+        lines = count_loc(s)
+
+        tree = ast.parse(s)
+        p = Parser(local)
+        p.visit(tree)
+    except Exception as e:
+        print('failed to parse python file: %s' % e)
+        return {}
+
+    return {'mods': p.mods, 'lines': lines}
 
 def parse_files(pyfiles):
     fstats = []
