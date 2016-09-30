@@ -1,77 +1,74 @@
-import re, sys, json, os
+import re, sys, json, os, ast
+class Parser(ast.NodeVisitor):
+    def __init__(self, local):
+        self.mods = {}
+        self.asnames = {}
+        self.calls = []
+        self.local = local
 
-def parse_file(fd, local):
-    stats = {'lines': 0}
-    mods = {}
+    def visit_Import(self, node):
+        for alias in node.names:
+            mod = alias.name
+            if mod not in self.mods and mod not in self.local:
+                self.mods[alias.name] = []
 
-    for line in fd:
-        line = line.split()
-        if len(line) == 0:
-            continue
+    def visit_ImportFrom(self, node):
+        mod = node.module
+        if mod not in self.mods and mod not in self.local:
+            self.mods[mod] = []
 
-        stats['lines'] += 1
+        split = mod.split('.', 1)
+        if len(split) == 1:
+            prefix = ''
+        else:
+            prefix = '%s.' % split[1]
 
-        if line[0] == 'import':
-            for k in range(1, len(line)):
-                line[k] = line[k].strip(',')
+        for alias in node.names:
+            name = '%s%s' % (prefix, alias.name)
+            asname = alias.asname
+            if name not in self.mods:
+                self.mods[mod].append(name)
+            if asname not in self.asnames:
+                self.asnames[asname] = name
 
-                prd = line[k].find('.')
-                if prd == -1:
-                    mod = line[k]
-                    fn = []
-                else:
-                    mod = line[k][0:prd]
-                    fn = [line[k][prd+1:len(line[k])]]
+    def visit_Call(self, node):
+        func = node.func
+        name = self.get_name(node.func)
+        attr = self.get_attr(node.func)
 
-                if mod not in mods and mod not in local:
-                    mods[mod] = fn
+        if name in self.mods:
+            self.mods[name].append(attr)
+        elif name in self.asnames:
+            mod = self.asnames[name]
+            self.mods[mod].append(attr)
 
-            continue
+        self.calls.append(name)
+    
+    def get_name(self, func):
+        if hasattr(func, 'id'):
+            return func.id
 
-        if line[0] == 'from':
-            prd = line[1].find('.')
-            if prd == -1:
-                mod = line[1]
-                pfx = ''
-            else:
-                mod = line[1][0:prd]
-                pfx = '%s.' % line[1][prd+1:len(line[1])]
+        if hasattr(func, 'value'):
+            return self.get_name(func.value)
 
-            if mod in local:
-                continue
-            if not mod in mods :
-                mods[mod] = []
-            for k in range(3, len(line)):
-                line[k] = line[k].strip(',')
-                if not line[k] in mods[mod] and not line[k] in local:
-                    mods[mod].append('%s%s' % (pfx, line[k]))
+        return 'unknown'
 
-            continue
+    def get_attr(self, func):
+        if type(func) == ast.Name:
+            return None
 
-        for stmt in line:
-            for mod, refs in mods.items():
-                start = stmt.find('%s.' % mod)
+        if type(func) == ast.Attribute:
+            return func.attr
 
-                if start != -1:
-                    start += len(mod) + 1
-                    stmt = stmt[start:len(stmt)]
-                    match = re.search('\.|\(|\)|\[|\]', stmt)
+        return 'unknown'
 
-                    if match: 
-                        end = match.start()
-                        ref = stmt[0:end]
-                    else:
-                        ref = stmt[0:len(stmt)]
+def parse_file(s, local):
+    tree = ast.parse(s)
+    p = Parser(local)
+    p.visit(tree)
 
-                    if ref not in refs:
-                        mods[mod].append(ref)
+    return p.mods
 
-
-    stats['modules'] = mods
-    return stats
-
-# benefit to separating whole modules vs 'from * ' syntax?
-# separate functions used vs variables?
 def parse_files(pyfiles):
     fstats = []
     local = []
@@ -81,8 +78,9 @@ def parse_files(pyfiles):
 
     for f in pyfiles:
         with open(f, 'r') as fd:
+            s = fd.read()
             try:
-                fstats.append(parse_file(fd, local))
+                fstats.append(parse_file(s, local))
             except Exception as e:
                 print('failed to parse file %s because: %s' % (f, e))
 
