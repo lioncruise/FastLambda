@@ -3,7 +3,6 @@ class Parser(ast.NodeVisitor):
     def __init__(self, local):
         self.mods = {}
         self.asnames = {}
-        self.calls = []
         self.local = local
 
     def visit_Import(self, node):
@@ -14,7 +13,10 @@ class Parser(ast.NodeVisitor):
 
     def visit_ImportFrom(self, node):
         mod = node.module
-        if mod not in self.mods and mod not in self.local:
+        if mod in self.local:
+            return
+
+        if mod not in self.mods:
             self.mods[mod] = []
 
         split = mod.split('.', 1)
@@ -26,9 +28,10 @@ class Parser(ast.NodeVisitor):
         for alias in node.names:
             name = '%s%s' % (prefix, alias.name)
             asname = alias.asname
-            if name not in self.mods:
+
+            if name not in self.mods[mod]:
                 self.mods[mod].append(name)
-            if asname not in self.asnames:
+            if asname and asname not in self.asnames:
                 self.asnames[asname] = name
 
     def visit_Call(self, node):
@@ -37,12 +40,14 @@ class Parser(ast.NodeVisitor):
         attr = self.get_attr(node.func)
 
         if name in self.mods:
-            self.mods[name].append(attr)
+            mod = name
         elif name in self.asnames:
             mod = self.asnames[name]
-            self.mods[mod].append(attr)
+        else:
+            return
 
-        self.calls.append(name)
+        if attr not in self.mods[mod]:
+            self.mods[mod].append(attr)
     
     def get_name(self, func):
         if hasattr(func, 'id'):
@@ -85,8 +90,6 @@ def parse_files(pyfiles):
                 print('failed to parse file %s because: %s' % (f, e))
 
     return fstats
-        
-
 
 if __name__ == '__main__':
     path = sys.argv[1]
