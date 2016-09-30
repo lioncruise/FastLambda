@@ -1,4 +1,5 @@
 import re, sys, json, os, ast
+
 class Parser(ast.NodeVisitor):
     def __init__(self, local):
         self.mods = {}
@@ -7,23 +8,28 @@ class Parser(ast.NodeVisitor):
 
     def visit_Import(self, node):
         for alias in node.names:
-            mod = alias.name
+            split = alias.name.split('.', 1)
+            mod = split[0]
+
             if mod not in self.mods and mod not in self.local:
-                self.mods[alias.name] = []
+                self.mods[mod] = []
+
+            for submod in split[1:]:
+                if submod not in self.mods[mod]:
+                    self.mods[mod].append(submod)
 
     def visit_ImportFrom(self, node):
-        mod = node.module
-        if mod in self.local:
-            return
-
-        if mod not in self.mods:
-            self.mods[mod] = []
-
-        split = mod.split('.', 1)
+        split = node.module.split('.', 1)
+        mod = split[0]
         if len(split) == 1:
             prefix = ''
         else:
             prefix = '%s.' % split[1]
+
+        if mod in self.local:
+            return
+        if mod not in self.mods:
+            self.mods[mod] = []
 
         for alias in node.names:
             name = '%s%s' % (prefix, alias.name)
@@ -93,12 +99,11 @@ def parse_files(pyfiles):
 
 if __name__ == '__main__':
     path = sys.argv[1]
-    fstats = []
     pyfiles = []
     for rel in os.listdir(path):
         f = os.path.join(path, rel)
         if f.endswith('.py'):
             pyfiles.append(f)
 
-    fstats.extend(parse_files(pyfiles))
+    fstats = parse_files(pyfiles)
     print(json.dumps(fstats, indent=4, sort_keys=True))
