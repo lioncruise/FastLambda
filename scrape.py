@@ -1,9 +1,9 @@
-import os, requests, json, subprocess, time, PyMongo
+import os, requests, json, subprocess, time, pymongo
 from parse import parse_files
 from threading import Thread, Lock
 from Queue import Queue
 
-client = MongoClient()
+client = pymongo.MongoClient('localhost:50000')
 db = client.pyscrape
 
 script_dir = os.path.dirname(os.path.realpath(__file__))
@@ -74,18 +74,15 @@ class Parser(Thread):
             
             subprocess.check_output(['rm', '-rf', path])
 
+def cond_del(d, k):
+    if k in d:
+        del d[k]
+
 def format_pkg(pkg):
-    del pkg['name']
-    del pkg['full_name']
-    del pkg['owner']
-    del pkg['html_url']
-    del pkg['private']
-    del pkg['description']
-    del pkg['fork']
-    del pkg['homepage']
-    del pkg['language']
-    del pkg['master_branch']
-    del pkg['default_branch']
+    rm_keys = ['name', 'full_name', 'owner', 'html_url', 'private', 'description', 'fork', 'homepage', 'language', 'master_branch', 'default_branch']
+    for k in rm_keys:
+        cond_del(pkg, k)
+
     return pkg
 
 def search(page):
