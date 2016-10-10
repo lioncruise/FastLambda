@@ -120,8 +120,8 @@ def parse_file(s, local):
         p = Parser(local)
         p.visit(tree)
     except Exception as e:
-        print('failed to parse python file: %s' % e)
-        return {}
+        #print('failed to parse python file: %s' % e)
+        return None
 
     return {'mods': p.mods, 'lines': lines}
 
@@ -133,12 +133,14 @@ def parse_files(pyfiles):
         local.append(n.split('.py')[0])
 
     for f in pyfiles:
-        with open(f, 'r') as fd:
-            s = fd.read()
-            try:
-                fstats.append(parse_file(s, local))
-            except Exception as e:
-                print('failed to parse file %s because: %s' % (f, e))
+	try:
+            with open(f, 'r') as fd:
+                s = fd.read()
+		result = parse_file(s, local)
+		if result:
+			fstats.append(result)
+	except Exception as e:
+	    print('failed to parse file %s because: %s' % (f, e))
 
     return fstats
 

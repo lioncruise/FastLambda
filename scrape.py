@@ -1,37 +1,62 @@
-import os, requests, json, subprocess, time, pymongo
+import os, requests, json, subprocess, time, pymongo, signal, sys
 from parse import parse_files
 from threading import Thread, Lock
 from Queue import Queue
-
-client = pymongo.MongoClient('localhost:50000')
-db = client.pyscrape
+from datetime import timedelta, date
 
 script_dir = os.path.dirname(os.path.realpath(__file__))
 
-data = {}
+client = pymongo.MongoClient()
+db = client.pyscrape
+
 queue = Queue(100)
-searchers = 5
-parsers = 10
+searchers = 1
+parsers = 1
 page = 1
 page_lock = Lock()
+done = False
+done_lock = Lock()
+
+total_count = 1000
+req_count = 0
+req_lock = Lock()
+prev_time = 0
+missed = []
+
+date_range = ''
+size_range = ''
 
 class Searcher(Thread):
     def run(self):
         global queue
         global page
+	global done
         while True:
+	    with done_lock:
+		    if done:
+			return
+
             with page_lock:
                 my_page = page
                 page += 1
 
+	    if total_count < (my_page+1)*100:
+		with done_lock:
+		    done = True
+		return
+
             try:
                 results = search(my_page)
             except:
+                with done_lock:
+		    done = True
                 return
 
+	    if len(results) == 0:
+		time.sleep(0.2)
             for result in results:
                 while queue.full():
-                    pass
+                    time.sleep(0.01)
 
                 queue.put(result)
 
@@ -40,85 +65,147 @@ class Parser(Thread):
         global queue
         global data
         while True:
-            pkg = queue.get()
+	    pkg = None
+	    while not pkg:
+		try:
+		    pkg = queue.get(timeout=1)
+		except:
+		    with done_lock:
+			if done:
+			    return
+
             pkg = format_pkg(pkg)
-            if pkg['id'] in data:
-                raise Exception('attempted to parse same repo twice')
+	    if db.packages.find({'_id': pkg['_id']}).count() > 0:
+		#print('package data already in db')
+		continue
+
             # want to use tmpfs for this but ran out of memory
-            path = '%s/clone/%s' % (script_dir, pkg['id'])
+            path = '%s/clone/%s' % (script_dir, pkg['_id'])
 
             start = time.time()
-            subprocess.check_output(['git', 'clone', pkg['clone_url'], path], stderr=subprocess.STDOUT)
+	    try:
+                subprocess.check_output(['git', 'clone', pkg['clone_url'], path], stderr=subprocess.STDOUT)
+	    except Exception as e:
+	        print('clone failed due to: %s' % e.output)
+		subprocess.check_output(['rm', '-rf', path])
+		continue
             t = time.time() - start
-            print('cloning took %fs' % t)
-
-            subprocess.check_output(['rm', '-rf', os.path.join(path, '.git')])
-
-            if pkg['id'] in data:
-                raise Exception('duplicate id in data')
+            #print('cloning took %fs' % t)
 
             start = time.time()
             parse_result = scrape(path)
             t = time.time() - start
-            print('parsing took %fs' % t)
-
-            data[pkg['id']] = parse_result
+            #print('parsing took %fs' % t)
 
             agg_lines = 0
             for f in parse_result:
-                agg_lines += f['lines']
+		agg_lines += f['lines']
 
             pkg['files'] = parse_result
             pkg['agg_lines'] = agg_lines
-            db_result = db.packages.insert_one(pkg)
-            
-            subprocess.check_output(['rm', '-rf', path])
+
+	    db_result = db.packages.insert_one(pkg)
+
+	    try:            
+	        subprocess.check_output(['rm', '-rf', path])
+            except:
+		return
 
 def cond_del(d, k):
     if k in d:
         del d[k]
 
 def format_pkg(pkg):
-    rm_keys = ['name', 'full_name', 'owner', 'html_url', 'private', 'description', 'fork', 'homepage', 'language', 'master_branch', 'default_branch']
+    rm_keys = ['full_name', 'owner', 'homepage', 'language', 'master_branch', 'default_branch', 'has_issues']
+
+    for k in pkg:
+        if k.endswith('url') and k != 'clone_url':
+            rm_keys.append(k)
+
     for k in rm_keys:
         cond_del(pkg, k)
 
+    pkg['_id'] = pkg['id']
+    del pkg['id']
     return pkg
 
 def search(page):
-    payload = {'q':'language:python', 'per_page':100, 'page':page}
+    global total_count
+    global req_count
+    global prev_time
+    global missed
+
+    req_lock.acquire()
+    if req_count >= 30:
+        while time.time()-prev_time < 60.1:
+            time.sleep(0.1)
+
+        prev_time = time.time()
+        req_count = 0
+
+    q = 'language:python created:%s size:%s' % (date_range, size_range)
+    payload = {'q': q, 'per_page': 100, 'page': page}
 
     r = requests.get('https://api.github.com/search/repositories', auth=(os.environ['GITHUB_USER'], os.environ['GITHUB_PW']), params=payload)
+    req_count += 1
+    req_lock.release()
 
     if r.status_code != 200:
         if page == 1:
-            print("invalid username or password")
-        raise
+            raise Exception('invalid username or password')
+	else:
+	    raise Exception('exceeded pages in results')
+
+    if r.json()['total_count'] > 1000 and date_range not in missed:
+	print('missed: %s' % date_range)
+	missed.append(date_range)
+
+    total_count = r.json()['total_count']
 
     return r.json()['items']
     
 
 def scrape(path):
-    fstats = []
     pyfiles = []
-    for rel in os.listdir(path):
-        f = os.path.join(path, rel)
+    dirs = [path]
 
-        if os.path.isdir(f):
-            fstats.extend(scrape(f))
-        elif f.endswith('.py'):
-            pyfiles.append(f)
-    fstats.extend(parse_files(pyfiles))
-    return fstats
+    while len(dirs) != 0:
+        d = dirs.pop(-1)
+        for rel in os.listdir(d):
+            f = os.path.join(d, rel)
+	    if os.path.islink(f):
+	        continue
+            elif os.path.isdir(f):
+		dirs.append(f)
+            elif os.path.isfile(f) and f.endswith('.py'):
+                pyfiles.append(f)
+
+    return parse_files(pyfiles)
 
 def wrjs(data, path):
     with open(path, 'w') as fd:
         json.dump(data, fd, indent=4, sort_keys=True)
 
+def daterange(start, end):
+    for n in range(int ((end - start).days)):
+	yield start + timedelta(n)
+
+def handle_sigint(signal, frame):
+    global done
+    with done_lock:
+	done = True
+
+    sys.exit(0)
 
 def main():
+    global page
+    global done
+    global total_count
+    total_count = 1000
+    page = 1
+    done = False
+    signal.signal(signal.SIGINT, handle_sigint)
     aggstart = time.time()
-    global queue
 
     wait = []
     for k in range(searchers):
@@ -127,19 +214,33 @@ def main():
         wait.append(s)
     
     for k in range(parsers):
-        Parser().start()
+        p = Parser()
+        p.start()
+	wait.append(p)
 
     for thread in wait:
         thread.join()
 
-    while not queue.empty():
-        pass
-
-    out = os.path.join(script_dir, 'scrape.json')
-    wrjs(data, out)
-
     t = time.time() - aggstart
-    print('finished in %fs' % t)
+    return t
+    print('finished %s in %fs' % (date_range, t))
 
 if __name__ == '__main__':
-    main()
+    size_ranges = ['<150', '>=150']
+    prev_time = time.time()
+    start_date = date(2015, 10, 26)
+    end_date = date(2016, 01, 01)
+
+    for single_date in daterange(start_date, end_date):
+	curr = single_date.strftime('%Y-%m-%d')
+	date_range = curr
+
+	for s in size_ranges:
+	    size_range = s
+	    t = main()
+	    print('finished %s, %s in %fs' % (date_range, size_range, t))
+    
+    path = os.path.join(script_dir, 'missed.json')
+    with open(path, 'w') as fd:
+	for miss in missed:
+		fd.write('%s\n' % miss)
