@@ -226,7 +226,7 @@ def main():
     print('finished %s in %fs' % (date_range, t))
 
 if __name__ == '__main__':
-    size_ranges = ['<150', '>=150']
+    size_ranges = ['<1', '>=1']
     prev_time = time.time()
     start_date = date(2015, 10, 26)
     end_date = date(2016, 01, 01)
