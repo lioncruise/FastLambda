@@ -1,6 +1,6 @@
 import os, requests, json, subprocess, time, pymongo, signal, sys
 from parse import parse_files
-from threading import Thread, Lock
+from threading import Thread, Lock, current_thread
 from Queue import Queue
 from datetime import timedelta, date
 
@@ -10,8 +10,8 @@ client = pymongo.MongoClient()
 db = client.pyscrape
 
 queue = Queue(100)
-searchers = 1
-parsers = 1
+searchers = 2
+parsers = 2
 page = 1
 page_lock = Lock()
 done = False
@@ -38,6 +38,7 @@ class Searcher(Thread):
 
             with page_lock:
                 my_page = page
+                print('%s got page %s' % (current_thread(), my_page))
                 page += 1
 
 	    if total_count < (my_page+1)*100:
@@ -58,7 +59,10 @@ class Searcher(Thread):
                 while queue.full():
                     time.sleep(0.01)
 
-                queue.put(result)
+                _id = result['id']
+                if db.packages.find({'_id': _id}).count() == 0:
+                    print('%s putting %s into queue' % (current_thread(), _id))
+                    queue.put(result)
 
 class Parser(Thread):
     def run(self):
@@ -76,9 +80,10 @@ class Parser(Thread):
 
             pkg = format_pkg(pkg)
 	    if db.packages.find({'_id': pkg['_id']}).count() > 0:
-		#print('package data already in db')
+		print('package data already in db') # SHOULDNT EVER HAPPEN
 		continue
 
+            print('%s got %s from queue' % (current_thread(), pkg['_id']))
             # want to use tmpfs for this but ran out of memory
             path = '%s/clone/%s' % (script_dir, pkg['_id'])
 
