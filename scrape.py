@@ -75,9 +75,9 @@ def parser(queue, done, done_lock):
 
         start = time.time()
         try:
-            out = subprocess.check_output(['git', 'clone', '--depth', '1', pkg['clone_url'], path], stderr=subprocess.STDOUT)
+            out = subprocess.check_output(['timeout', '120', 'git', 'clone', '--depth', '1', pkg['clone_url'], path], stderr=subprocess.STDOUT)
         except Exception as e:
-            print('clone failed due to: %s' % e.output)
+            print('clone %s failed' % pkg['clone_url'])
             subprocess.check_output(['rm', '-rf', path])
             continue
         t = time.time() - start
@@ -212,8 +212,8 @@ def main():
 if __name__ == '__main__':
     req_count = Value('i', 0)
     size_ranges = ['<=1', '1..40', '>40']
-    start_date = date(2015, 11, 6)
-    end_date = date(2016, 01, 01)
+    start_date = date(2016, 01, 01)
+    end_date = date(2016, 10, 12)
     for single_date in daterange(start_date, end_date):
         curr = single_date.strftime('%Y-%m-%d')
         date_range = curr

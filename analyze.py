@@ -1,40 +1,108 @@
 import sys, json, pymongo
+import numpy as np
 
 client = pymongo.MongoClient()
-pkgs = client.pyscrape.packages
+repos = client.pyscrape.repos
+metadata = client.metadata.metadata
+freqs = client.pyscrape.freqs
 
-def subfrequencies(query):
-    subfreq = {}
-    for repo in pkgs.find(query):
-        for s in scripts:
-            for mod, submod in s['mods'].items():
-                if mod not in subfreq:
-                    subfreq[mod] = {}
+def get_year(repo):
+    if repo['created_at'] > '2016':
+        return '2016'
+    elif repo['created_at'] > '2015':
+        return '2015'
+    elif repo['created_at'] > '2014':
+        return '2014'
+    elif repo['created_at'] > '2013':
+        return '2013'
+    elif repo['created_at'] > '2012':
+        return '2012'
+    elif repo['created_at'] > '2011':
+        return '2011'
 
-                if submod not in subfreq[mod]:
-                    subfreq[mod] = 1
-                else:
-                    subfreq[mod] += 1
-
-    return subfreq
+    return '2010'
 
 def frequencies(query):
     freq = {}
     for repo in pkgs.find(query):
+        year = get_year(repo)
         for s in scripts:
-            for mod in s['mods']:
-                if mod not in freq:
-                    freq[mod] = 1
-                else:
-                    freq[mod] += 1
+            for mod, submods in s['mods'].items():
+                entry = freqs.find_one({'mod':mod}).count()
+                if not entry:
+                    entry = {
+                        'mod': mod,
+                        'total': 0,
+                        '2016': 0,
+                        '2015': 0,
+                        '2014': 0,
+                        '2013': 0,
+                        '2012': 0,
+                        '2011': 0,
+                        '2010': 0,
+                        'submods': {}
+                    }
+
+                entry['total'] += 1
+                entry[year] += 1
+
+                for submod in submods:
+                    if not submod in entry['submods']
+                        entry['submods'][submod] = 1
+                    else:
+                        entry['submods'][submod] += 1
+
+                freqs.replace_one({'mod': mod}, entry, upsert=True)
+                        
 
     return freq
 
+def metastats(query):
+    params = ['size', 'forks', 'stargazers_count', 'watchers']
+    stats = {}
+    for param in params:
+        stats[param] = {
+            'sum': 0,
+            'mean': 0,
+            'variance': 0,
+        }
+        
+    # Welford's method for online mean & variance
+    num = 0
+    for repo in pkgs.find(query):
+        num += 1
+        for param in params:
+            val = repo[param]
+            stats[param]['sum'] += val
 
-def main(f):
-    freq = frequencies()
+            delta = x - stats[param]['mean']
+            stats[param]['mean'] += delta/num
+            stats[param]['variance'] += delta*(x - stats[param]['mean'])
 
-    return freq['total']
+    for param in params:
+        stats[param]['variance'] = stats[param]['variance']/(num-1)
+
+    return stats
+
+def main(out):
+    #frequencies()
+    stats = {
+        'total': metastats({})
+        '2010': metastats({'created': {'$gt':'2010', '$lt':'2011'}})
+        '2011':  metastats({'created': {'$gt':'2011', '$lt':'2012'}})
+        '2012':  metastats({'created': {'$gt':'2012', '$lt':'2013'}})
+        '2013':  metastats({'created': {'$gt':'2013', '$lt':'2014'}})
+        '2014':  metastats({'created': {'$gt':'2014', '$lt':'2015'}})
+        '2015':  metastats({'created': {'$gt':'2015', '$lt':'2016'}})
+        '2016':  metastats({'created': {'$gt':'2016'}})
+    }
+
+    print(stats)
+    with open(out) as fd:
+        json.dump(parsed, fd, indent=4, sort_keys=True)
 
 if __name__ == '__main__':
+    if len(sys.argv[1] != 2):
+        print('Usage: stats.py <out.txt>')
+
     main()
