@@ -24,7 +24,7 @@ def get_year(repo):
 
 def frequencies(query):
     freq = {}
-    for repo in pkgs.find(query):
+    for repo, scripts in repos.find(query).items():
         year = get_year(repo)
         for s in scripts:
             for mod, submods in s['mods'].items():
@@ -47,7 +47,7 @@ def frequencies(query):
                 entry[year] += 1
 
                 for submod in submods:
-                    if not submod in entry['submods']
+                    if not submod in entry['submods']:
                         entry['submods'][submod] = 1
                     else:
                         entry['submods'][submod] += 1
@@ -58,26 +58,26 @@ def frequencies(query):
     return freq
 
 def metastats(query):
-    params = ['size', 'forks', 'stargazers_count', 'watchers']
+    params = ['size', 'forks_count', 'stargazers_count', 'watchers_count']
     stats = {}
     for param in params:
         stats[param] = {
             'sum': 0,
-            'mean': 0,
-            'variance': 0,
+            'mean': 0.0,
+            'variance': 0.0,
         }
         
     # Welford's method for online mean & variance
-    num = 0
-    for repo in pkgs.find(query):
+    num = 0.0
+    for repo in metadata.find(query):
         num += 1
         for param in params:
             val = repo[param]
             stats[param]['sum'] += val
 
-            delta = x - stats[param]['mean']
+            delta = val - stats[param]['mean']
             stats[param]['mean'] += delta/num
-            stats[param]['variance'] += delta*(x - stats[param]['mean'])
+            stats[param]['variance'] += delta*(val - stats[param]['mean'])
 
     for param in params:
         stats[param]['variance'] = stats[param]['variance']/(num-1)
@@ -87,22 +87,22 @@ def metastats(query):
 def main(out):
     #frequencies()
     stats = {
-        'total': metastats({})
-        '2010': metastats({'created': {'$gt':'2010', '$lt':'2011'}})
-        '2011':  metastats({'created': {'$gt':'2011', '$lt':'2012'}})
-        '2012':  metastats({'created': {'$gt':'2012', '$lt':'2013'}})
-        '2013':  metastats({'created': {'$gt':'2013', '$lt':'2014'}})
-        '2014':  metastats({'created': {'$gt':'2014', '$lt':'2015'}})
-        '2015':  metastats({'created': {'$gt':'2015', '$lt':'2016'}})
-        '2016':  metastats({'created': {'$gt':'2016'}})
+        'total': metastats({}),
+        '2010': metastats({'created_at': {'$gt':'2010', '$lt':'2011'}}),
+        '2011':  metastats({'created_at': {'$gt':'2011', '$lt':'2012'}}),
+        '2012':  metastats({'created_at': {'$gt':'2012', '$lt':'2013'}}),
+        '2013':  metastats({'created_at': {'$gt':'2013', '$lt':'2014'}}),
+        '2014':  metastats({'created_at': {'$gt':'2014', '$lt':'2015'}}),
+        '2015':  metastats({'created_at': {'$gt':'2015', '$lt':'2016'}}),
+        '2016':  metastats({'created_at': {'$gt':'2016'}})
     }
 
     print(stats)
-    with open(out) as fd:
-        json.dump(parsed, fd, indent=4, sort_keys=True)
+    with open(out, 'w') as fd:
+        json.dump(stats, fd, indent=4, sort_keys=True)
 
 if __name__ == '__main__':
-    if len(sys.argv[1] != 2):
-        print('Usage: stats.py <out.txt>')
+    if len(sys.argv) != 2:
+        print('Usage: analyze.py <out.txt>')
 
-    main()
+    main(sys.argv[1])
