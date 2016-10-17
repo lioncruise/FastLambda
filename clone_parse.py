@@ -28,12 +28,12 @@ def parser(lock):
             continue
 
         t = time.time() - start
-        #print('cloning took %fs' % t)
+        print('cloning took %fs' % t)
 
         start = time.time()
         parse_result = scrape(path)
         t = time.time() - start
-        #print('parsing took %fs' % t)
+        print('parsing took %fs' % t)
 
         agg_lines = 0
         for f in parse_result:

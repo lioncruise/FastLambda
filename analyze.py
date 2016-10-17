@@ -1,10 +1,12 @@
-import sys, json, pymongo
+import sys, json, pymongo, os
 import numpy as np
 
 client = pymongo.MongoClient()
-repos = client.pyscrape.repos
-metadata = client.metadata.metadata
-freqs = client.pyscrape.freqs
+#repos = client.pyscrape.repos
+repos = client.sample.sample_data
+metadata = client.metadata.sample
+freqs = client.sample.freqs
+ftypes = client.sample.ftypes
 
 def get_year(repo):
     if repo['created_at'] > '2016':
@@ -22,70 +24,115 @@ def get_year(repo):
 
     return '2010'
 
-def frequencies(query):
-    freq = {}
-    for repo, scripts in repos.find(query).items():
+def frequencies():
+    total = repos.count()
+    curr = 0
+    cursor = repos.find(no_cursor_timeout=True)
+    for repo in cursor:
+        print('processed %s out of %s' % (curr, total))
+        
         year = get_year(repo)
-        for s in scripts:
+        keys = ['total', year]
+        for s in repo['pyfiles']:
             for mod, submods in s['mods'].items():
-                entry = freqs.find_one({'mod':mod}).count()
+                entry = freqs.find_one({'mod':mod})
                 if not entry:
                     entry = {
                         'mod': mod,
-                        'total': 0,
-                        '2016': 0,
-                        '2015': 0,
-                        '2014': 0,
-                        '2013': 0,
-                        '2012': 0,
-                        '2011': 0,
-                        '2010': 0,
-                        'submods': {}
+                        'total': {'count':0, 'submods':{}},
+                        '2016': {'count':0, 'submods':{}},
+                        '2015': {'count':0, 'submods':{}},
+                        '2014': {'count':0, 'submods':{}},
+                        '2013': {'count':0, 'submods':{}},
+                        '2012': {'count':0, 'submods':{}},
+                        '2011': {'count':0, 'submods':{}},
+                        '2010': {'count':0, 'submods':{}},
                     }
 
-                entry['total'] += 1
-                entry[year] += 1
+                entry['total']['count'] += 1
+                entry[year]['count'] += 1
 
                 for submod in submods:
-                    if not submod in entry['submods']:
-                        entry['submods'][submod] = 1
-                    else:
-                        entry['submods'][submod] += 1
+                    if not submod:
+                        continue
+
+                    submod = submod.replace('.', '%')
+
+                    for key in keys:
+                        if not submod in entry[key]['submods']:
+                            entry[key]['submods'][submod] = 1
+                        else:
+                            entry[key]['submods'][submod] += 1
 
                 freqs.replace_one({'mod': mod}, entry, upsert=True)
-                        
+
+        for ftype, data in repo['filetypes'].items():
+                entry = ftypes.find_one({'filetype':ftype})
+                if not entry:
+                    entry = {
+                        'filetype': ftype,
+                        'total': {'count':0, 'size': 0},
+                        '2016': {'count':0, 'size': 0},
+                        '2015': {'count':0, 'size':0},
+                        '2014': {'count':0, 'size':0},
+                        '2013': {'count':0, 'size':0},
+                        '2012': {'count':0, 'size':0},
+                        '2011': {'count':0, 'size':0},
+                        '2010': {'count':0, 'size':0},
+                    }
+
+                entry['total']['count'] += data['count']
+                entry[year]['count'] += data['count']
+
+                entry['total']['size'] += data['agg_size']
+                entry[year]['size'] += data['agg_size']
+
+
+                ftypes.replace_one({'filetype': ftype}, entry, upsert=True)
+
+        curr += 1
+
+    cursor.close()
 
     return freq
 
 def metastats(query):
-    params = ['size', 'forks_count', 'stargazers_count', 'watchers_count']
-    stats = {}
-    for param in params:
-        stats[param] = {
-            'sum': 0,
-            'mean': 0.0,
-            'variance': 0.0,
-        }
+    params = {'size':[], 'forks_count':[], 'stargazers_count':[], 'watchers_count':[]}
         
-    # Welford's method for online mean & variance
-    num = 0.0
     for repo in metadata.find(query):
-        num += 1
         for param in params:
-            val = repo[param]
-            stats[param]['sum'] += val
+            params[param].append(repo[param])
 
-            delta = val - stats[param]['mean']
-            stats[param]['mean'] += delta/num
-            stats[param]['variance'] += delta*(val - stats[param]['mean'])
-
-    for param in params:
-        stats[param]['variance'] = stats[param]['variance']/(num-1)
+    stats = {}
+    for param, array in params.items():
+        stats[param] = {
+            'sum': np.sum(array),
+            'mean': np.mean(array),
+            'median': np.median(array),
+            'std': np.std(array),
+            'max': np.max(array),
+            'min': np.min(array)
+        }
 
     return stats
 
-def main(out):
-    #frequencies()
+def write_counts(out):
+    counts = {
+        '2010': metadata.find({'created_at': {'$gt':'2010', '$lt':'2011'}}).count(),
+        '2011':  metadata.find({'created_at': {'$gt':'2011', '$lt':'2012'}}).count(),
+        '2012':  metadata.find({'created_at': {'$gt':'2012', '$lt':'2013'}}).count(),
+        '2013':  metadata.find({'created_at': {'$gt':'2013', '$lt':'2014'}}).count(),
+        '2014':  metadata.find({'created_at': {'$gt':'2014', '$lt':'2015'}}).count(),
+        '2015':  metadata.find({'created_at': {'$gt':'2015', '$lt':'2016'}}).count(),
+        '2016':  metadata.find({'created_at': {'$gt':'2016'}}).count()
+    }
+
+    with open(out, 'w') as fd:
+        fd.write('# year count\n')
+        for year in sorted(counts):
+            fd.write('%s %s\n' % (year, float(counts[year])/1000.0))
+
+def write_meta(out):
     stats = {
         'total': metastats({}),
         '2010': metastats({'created_at': {'$gt':'2010', '$lt':'2011'}}),
@@ -97,12 +144,19 @@ def main(out):
         '2016':  metastats({'created_at': {'$gt':'2016'}})
     }
 
-    print(stats)
     with open(out, 'w') as fd:
         json.dump(stats, fd, indent=4, sort_keys=True)
 
-if __name__ == '__main__':
-    if len(sys.argv) != 2:
-        print('Usage: analyze.py <out.txt>')
 
-    main(sys.argv[1])
+def main():
+    bin_dir = os.path.join(os.path.dirname(__file__), 'plots', 'bin')
+    frequencies()
+    write_meta(os.path.join(bin_dir, 'sample_meta.json'))
+    write_counts(os.path.join(bin_dir, 'sample_counts.data'))
+
+if __name__ == '__main__':
+    if len(sys.argv) != 1:
+        print('Usage: analyze.py')
+        sys.exit(1)
+
+    main()

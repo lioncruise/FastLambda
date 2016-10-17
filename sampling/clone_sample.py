@@ -8,14 +8,17 @@ cloners = 12
 
 def cloner(lock):
     client = pymongo.MongoClient()
-    fromdb = client.metadata.full_sample_copy
+    fromdb = client.metadata.sample_copy
 
     while True:
         with lock:
             repo = fromdb.find_one()
+            if not repo:
+                return
+
             fromdb.delete_one({'id': repo['id']})
 
-        path = '%s/clone/%s' % (script_dir, repo['_id'])
+        path = '/home/eoakes/sample/%s' % repo['id']
 
         start = time.time()
         try:
