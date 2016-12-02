@@ -1,27 +1,33 @@
-import sys, json, pymongo
+import sys, json, pymongo, random
 
 client = pymongo.MongoClient()
 repos = client.metadata.metadata
 
-def main(size, out):
-    out_table = client.metadata[out]
-    curr = 0
+def main(size):
+    out_table = client.sample.sample
+    total = repos.count()
+
+    curr_size = 0
     count = 0
     query = {}
-    for repo in repos.find(query):
-        if curr + repo['size'] > size:
+    while curr_size < size:
+        r = random.randint(0, total-1)
+        repo = repos.find().limit(-1).skip(r).next()
+
+        if curr_size + repo['size'] > size:
             break
 
-        curr += repo['size']
-        out_table.insert_one(repo)
-        count += 1
+        if out_table.find({'id':repo['id']}).count() == 0:
+            out_table.insert_one(repo)
+            curr_size += repo['size']
+            count += 1
 
     return count
 
 if __name__ == '__main__':
-    if len(sys.argv) != 3:
-        print('Usage: sample.py <size> <outtable>')
+    if len(sys.argv) != 2:
+        print('Usage: sample.py <size>')
         sys.exit(1)
 
-    sample_size = main(float(sys.argv[1]), sys.argv[2])
-    print('number of samples added to %s: %s' % (sys.argv[2], sample_size))
+    sample_size = main(float(sys.argv[1]))
+    print('number of samples: %s' % sample_size)

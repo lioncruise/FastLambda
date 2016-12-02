@@ -21,7 +21,7 @@ class Parser(ast.NodeVisitor):
                     self.mods[mod].append(submod)
 
     def visit_ImportFrom(self, node):
-        # handle relative imports - don't care about local packages
+        # ignore relative imports - don't care about local packages
         if not node.module:
             return
 

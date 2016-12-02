@@ -1,12 +1,28 @@
 import sys, json, pymongo, os
 import numpy as np
+from stdlib_list import stdlib_list
 
 client = pymongo.MongoClient()
-#repos = client.pyscrape.repos
 repos = client.sample.sample_data
 metadata = client.metadata.sample
 freqs = client.sample.freqs
-ftypes = client.sample.ftypes
+#ftypes = client.sample.ftypes
+ftypes = client.sample.pip_ftypes
+
+def standard_mods():
+    libs2 = stdlib_list('2.7')
+    libs3 = stdlib_list('3.5')
+    ret = []
+
+    for mod in libs2:
+        if not '.' in mod:
+            ret.append(mod)
+
+    for mod in libs3:
+        if not '.' in mod and mod not in ret:
+            ret.append(mod)
+
+    return ret
 
 def get_year(repo):
     if repo['created_at'] > '2016':
@@ -25,6 +41,7 @@ def get_year(repo):
     return '2010'
 
 def frequencies():
+    banned = standard_mods()
     total = repos.count()
     curr = 0
     cursor = repos.find(no_cursor_timeout=True)
@@ -35,6 +52,8 @@ def frequencies():
         keys = ['total', year]
         for s in repo['pyfiles']:
             for mod, submods in s['mods'].items():
+                if mod in banned:
+                    continue
                 entry = freqs.find_one({'mod':mod})
                 if not entry:
                     entry = {
@@ -94,8 +113,6 @@ def frequencies():
 
     cursor.close()
 
-    return freq
-
 def metastats(query):
     params = {'size':[], 'forks_count':[], 'stargazers_count':[], 'watchers_count':[]}
         
@@ -108,7 +125,7 @@ def metastats(query):
         stats[param] = {
             'sum': np.sum(array),
             'mean': np.mean(array),
-            'median': np.median(array),
+s            'median': np.median(array),
             'std': np.std(array),
             'max': np.max(array),
             'min': np.min(array)
@@ -151,8 +168,8 @@ def write_meta(out):
 def main():
     bin_dir = os.path.join(os.path.dirname(__file__), 'plots', 'bin')
     frequencies()
-    write_meta(os.path.join(bin_dir, 'sample_meta.json'))
-    write_counts(os.path.join(bin_dir, 'sample_counts.data'))
+    #write_meta(os.path.join(bin_dir, 'sample_meta.json'))
+    #write_counts(os.path.join(bin_dir, 'sample_counts.data'))
 
 if __name__ == '__main__':
     if len(sys.argv) != 1:

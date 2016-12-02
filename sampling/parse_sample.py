@@ -12,7 +12,7 @@ parsers = 12
 
 def parser(lock):
     client = pymongo.MongoClient()
-    fromdb = client.metadata.sample_copy
+    fromdb = client.sample.parse_copy
     todb = client.sample.sample_data
 
     while True:
@@ -24,12 +24,13 @@ def parser(lock):
 
         path = '%s/%s' % (sample_dir, repo['id'])
         if not os.path.isdir(path):
+            client.sample.sample.delete_one({'id': repo['id']})
             continue
 
         start = time.time()
         parse_results = scrape(path)
         t = time.time() - start
-        #print('parsing took %fs' % t)
+        print('parsing took %fs' % t)
 
         pylines = 0
         for f in parse_results[0]:
@@ -66,14 +67,12 @@ def scrape(path):
                 if ftype == '':
                     ftype = 'none'
                 else:
-                    ftype = ftype.strip('.')
+                    ftype = ftype.strip('.').lower()
 
                 if not ftype in ftypes:
-                    ftypes[ftype] = {'count':0, 'agg_size':0}
+                    ftypes[ftype] = []
 
-                ftypes[ftype]['count'] += 1
-                ftypes[ftype]['agg_size'] += os.path.getsize(f)
-                    
+                ftypes[ftype].append(os.path.getsize(f))
 
     return [parse_files(pyfiles), ftypes]
 
