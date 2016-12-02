@@ -1,3 +1,7 @@
+'''
+Clone all of the repositories in 'fromdb,' parse them, insert results into 'todb, and destroy the evidence'
+'''
+
 import os, requests, json, subprocess, time, pymongo, signal, sys
 from parse import parse_files
 from multiprocessing import Process, Queue, Lock, Value, current_process

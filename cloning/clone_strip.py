@@ -1,3 +1,7 @@
+'''
+Clone the repositories in 'fromdb' and strip them of all non-python files
+'''
+
 import os, requests, json, subprocess, time, pymongo, signal, sys
 from multiprocessing import Process, Queue, Lock, Value, current_process
 

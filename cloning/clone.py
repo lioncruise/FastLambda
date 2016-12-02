@@ -2,6 +2,7 @@ import os, requests, json, subprocess, time, pymongo, signal, sys
 from multiprocessing import Process, Queue, Lock, Value, current_process
 
 script_dir = os.path.dirname(os.path.realpath(__file__))
+clone_dir = '/home/data/repos'
 
 cloners = 12
 
@@ -17,7 +18,7 @@ def cloner(lock):
 
             fromdb.delete_one({'id': repo['id']})
 
-        path = '/home/data/repos/%s' % repo['id']
+        path = os.path.join(clone_dir, str(repo['id'])[0], str(repo['id'])[1], str(repo['id']))
 
         start = time.time()
         try:
