@@ -1,3 +1,7 @@
+'''
+Requests repositories from GitHub API, clones them, parses them, and deletes them. Better to get all metadata first.
+'''
+
 import os, requests, json, subprocess, time, pymongo, signal, sys
 from parse import parse_files
 from multiprocessing import Process, Queue, Lock, Value, current_process

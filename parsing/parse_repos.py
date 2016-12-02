@@ -6,14 +6,15 @@ sys.path.append(os.path.join(script_dir, '..'))
 
 from parse import parse_files
 
-sample_dir = '/home/eoakes/sample'
+clone_dir = '/home/data/repos'
 
 parsers = 12
 
 def parser(lock):
     client = pymongo.MongoClient()
-    fromdb = client.sample.parse_copy
-    todb = client.sample.sample_data
+    fromdb = client.metadata.copy
+    todb = client.full.repos
+    djangodb = client.full.django
 
     while True:
         with lock:
@@ -22,10 +23,9 @@ def parser(lock):
                 return
             fromdb.delete_one({'id': repo['id']})
 
-        path = '%s/%s' % (sample_dir, repo['id'])
-        if not os.path.isdir(path):
-            client.sample.sample.delete_one({'id': repo['id']})
-            continue
+        path = os.path.join(clone_dir, str(repo['id'])[0], str(repo['id'])[1], str(repo['id']))
+        if not os.path.isdir(path)
+            client.metadata.metadata.delete_one({'id': repo['id']})
 
         start = time.time()
         parse_results = scrape(path)
@@ -40,12 +40,13 @@ def parser(lock):
         repo['filetypes'] = parse_results[1]
         repo['pylines'] = pylines
 
-        db_result = todb.insert_one(repo)
+        todb.insert_one(repo)
 
-def cond_del(d, k):
-    if k in d:
-        del d[k]
-
+        for f in repo['pyfiles']:
+            if 'django' in f['mods']:
+                djangodb.insert_one(repo)
+                break
+                
 def scrape(path):
     pyfiles = []
     dirs = [path]
