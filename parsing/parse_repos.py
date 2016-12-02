@@ -4,17 +4,17 @@ from multiprocessing import Process, Queue, Lock, Value, current_process
 script_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(script_dir, '..'))
 
-from parse import parse_files
+from ..parse import parse_files
 
 clone_dir = '/home/data/repos'
+fromdb = client.metadata.copy
+todb = client.full.repos
+djangodb = client.full.django
 
 parsers = 12
 
 def parser(lock):
     client = pymongo.MongoClient()
-    fromdb = client.metadata.copy
-    todb = client.full.repos
-    djangodb = client.full.django
 
     while True:
         with lock:
@@ -24,8 +24,9 @@ def parser(lock):
             fromdb.delete_one({'id': repo['id']})
 
         path = os.path.join(clone_dir, str(repo['id'])[0], str(repo['id'])[1], str(repo['id']))
-        if not os.path.isdir(path)
-            client.metadata.metadata.delete_one({'id': repo['id']})
+        if not os.path.isdir(path):
+            client.metadata.cloned.delete_one({'id': repo['id']})
+            continue
 
         start = time.time()
         parse_results = scrape(path)

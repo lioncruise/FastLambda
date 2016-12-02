@@ -1,9 +1,9 @@
 '''
-Clone all of the repositories in 'fromdb,' parse them, insert results into 'todb, and destroy the evidence'
+Clone all of the repositories in 'fromdb,' parse them, insert results into 'todb, and destroys the evidence'
 '''
 
 import os, requests, json, subprocess, time, pymongo, signal, sys
-from parse import parse_files
+from ..parse import parse_files
 from multiprocessing import Process, Queue, Lock, Value, current_process
 
 script_dir = os.path.dirname(os.path.realpath(__file__))
