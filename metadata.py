@@ -1,111 +1,72 @@
-import os, requests, json, subprocess, time, pymongo, signal, sys
-from parse import parse_files
-from multiprocessing import Process, Queue, Lock, Value, current_process
-from datetime import timedelta, date
+import os, requests, time, pymongo, signal, datetime
 
-script_dir = os.path.dirname(os.path.realpath(__file__))
+client = pymongo.MongoClient()
+table = client.java.metadata
 
-searchers = 3
+def search(page, date, size):
+    global total_count
+    global prev_time
+    global req_count
 
-date_range = ''
-size_range = ''
-
-def searcher(queue, page, page_lock, req_count, req_lock, prev_time, total_count):
-    client = pymongo.MongoClient()
-    table = client.csharp.metadata
-
-    while True:
-        with page_lock:
-            my_page = page.value
-            #print('%s got page %s' % (current_process(), my_page))
-            page.value += 1
-
-        if total_count.value < (my_page+1)*100:
-            return
-
-        try:
-            results = search(my_page, req_count, req_lock, prev_time, total_count)
-        except Exception as e:
-            print('results threw exception: %s' % e)
-            return
-
-        if len(results) > 0:
-            table.insert_many(results)
-
-def search(my_page, req_count, req_lock, prev_time, total_count):
-    req_lock.acquire()
-    if req_count.value >= 30:
-        while time.time()-prev_time.value < 60.1:
+    if req_count >= 30:
+        while time.time()-prev_time < 60.1:
             time.sleep(0.1)
 
-        prev_time.value = time.time()
-        req_count.value = 0
+        prev_time = time.time()
+        req_count = 0
 
-    q = 'language:c# created:%s size:%s' % (date_range, size_range)
-    payload = {'q': q, 'per_page': 100, 'page': my_page}
+    q = 'language:java created:%s size:%s' % (date, size)
+    payload = {'q': q, 'per_page': 100, 'page': page}
 
     r = requests.get('https://api.github.com/search/repositories', auth=(os.environ['GITHUB_USER'], os.environ['GITHUB_PW']), params=payload)
-    req_count.value += 1
-    req_lock.release()
+    req_count += 1
 
     if r.status_code != 200:
-        if my_page == 1:
-            raise Exception('invalid username or password')
-	else:
-	    raise Exception(r.text)
+        raise Exception(r.text)
 
     if r.json()['total_count'] > 1000:
 	print('missed: %s' % date_range)
-        total_count.value = 1000
+        total_count = 1000
     else:
-        total_count.value = r.json()['total_count']
+        total_count = r.json()['total_count']
 
     return r.json()['items']
     
 def daterange(start, end):
     for n in range(int ((end - start).days)):
-	yield start + timedelta(n)
+	yield start + datetime.timedelta(n)
 
 def main():
-    global req_count
     global total_count
+    global req_count
+    global prev_time
     total_count = 1000
+    req_count = 0
+    prev_time = time.time()
 
-    aggstart = time.time()
-    
-    procs = []
-    queue = Queue()
-
-    page = Value('i', 1)
-    page_lock = Lock()
-    req_lock = Lock()
-    prev_time = Value('d', time.time())
-    total_count = Value('i', 1000)
-
-    for k in range(searchers):
-        s = Process(target=searcher, args=(queue, page, page_lock, req_count, req_lock, prev_time, total_count))
-        s.start()
-        procs.append(s)
-
-    for proc in procs:
-        proc.join()
-        proc.terminate()
-    
-    return time.time() - aggstart
-
-if __name__ == '__main__':
-    req_count = Value('i', 0)
-    #size_ranges = ['<=1', '1..40', '>40']
-    size_ranges = ['>0']
-    start_date = date(2010, 01, 01)
-    end_date = date(2015, 01, 01)
+    size_ranges = ['<5', '>=5']
+    start_date = datetime.date(2010, 01, 01)
+    end_date = datetime.date(2016, 12, 01)
 
     for single_date in daterange(start_date, end_date):
-        curr = single_date.strftime('%Y-%m-%d')
-        date_range = curr
+        date = single_date.strftime('%Y-%m-%d')
 
-        for s in size_ranges:
-            size_range = s
-            t = main()
-            print('finished %s, %s in %fs' % (date_range, size_range, t))
+        for size in size_ranges:
+            t = time.time()
+            for page in range(1, 11):
+                try:
+                    results = search(page, date, size)
+                except Exception as e:
+                    print('search threw exception: %s' % e)
+                    break
 
+                if len(results) > 0:
+                    table.insert_many(results)
+
+                if total_count < (page)*100:
+                    break
+
+            print('finished %s, %s in %fs' % (date, size, time.time()-t))
+
+if __name__ == '__main__':
+    main()
